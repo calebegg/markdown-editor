@@ -1,0 +1,374 @@
+<!doctype html>
+<title>Markdown Editor</title>
+<link rel="stylesheet" href="fontawesome.css" />
+<script src="Markdown.Converter.js"></script>
+<script src="swfobject.js"></script>
+<script src="downloadify.min.js"></script>
+<style>
+    textarea {
+        position: absolute;
+        left: 80px;
+        top: 0;
+        bottom: 0;
+        font: 14px Monaco, monospace;
+        width: 80ch;
+        width: 40em;
+    }
+    #output {
+        width: calc(100% - 80ch - 80px);
+        width: calc(100% - 40em - 80px);
+        width: -webkit-calc(100% - 40em - 80px);
+        min-width: 200px;
+        position: absolute;
+        right: 20px;
+        top: 0;
+        bottom: 0;
+    }
+    .controls {
+        position: absolute;
+        top: 20px;
+        left: 0;
+    }
+    .controls a {
+        display: block;
+        width: 40px;
+        height: 40px;
+        border: solid #888 1px;
+        text-decoration: none;
+        line-height: 55px;
+        text-align: center;
+        color: #888;
+        margin-left: 20px;
+    }
+    .desc {
+        width: 80px;
+        font-size: 8px;
+        font-family: sans-serif;
+        text-transform: uppercase;
+        text-align: center;
+        margin: 5px 0 10px;
+    }
+</style>
+
+<div class="controls">
+    <a href="javascript:embolden()"><i class="icon-2x icon-bold"></i></a>
+    <div class="desc">bold</div>
+    <a href="javascript:italicize()"><i class="icon-2x icon-italic"></i></a>
+    <div class="desc">italic</div>
+    <a href="javascript:linkify()"><i class="icon-2x icon-link"></i></a>
+    <div class="desc">link</div>
+    <a href="javascript:blockoff()"><i class="icon-2x icon-indent-right"></i></a>
+    <div class="desc">blockquote</div>
+    <a href="javascript:createOL()"><i class="icon-2x icon-list-ol"></i></a>
+    <div class="desc">numbered list</div>
+    <a href="javascript:createUL()"><i class="icon-2x icon-list-ul"></i></a>
+    <div class="desc">bulleted list</div>
+    <a style="border:none;"><div id="saveas"></div></a>
+    <div class="desc">save</div>
+</div>
+
+<textarea>
+Markdown editor
+---------------
+
+Markdown is a wonderful language for simple, formatted documents. What I miss most from editing Markdown, though, is some of the WYSIWYG-editing idioms, such as smarter numbered lists, keyboard shortcuts for formatting features, etc. With this tool, I hope to combine the best parts of both of these editing styles.
+
+1. Numbered
+2. Lists
+3. Are
+4. Cool
+
+There needs to be a paragraph here, which is lame.
+
+* So
+* Are
+* Bulleted
+* Ones
+</textarea>
+
+<div id="output">
+</div>
+
+<script>
+    var converter = new Markdown.Converter();
+    var ta = document.getElementsByTagName('textarea')[0];
+    var output = document.getElementById('output');
+    var undo_states = [];
+    var redo_states = [];
+    var undo_keystrokes = 0;
+    INS = 1; DEL = 2;
+    var undo_state = INS;
+
+    function pushUndo() {
+        undo_states.push({val: ta.value,
+            ss: ta.selectionStart,
+            se: ta.selectionEnd});
+        if (undo_states.length > 200) {
+            undo_states.shift();
+        }
+        console.log("Clearing redo states");
+        redo_states = [];
+    }
+    function applyState(state) {
+        ta.value = state.val;
+        ta.selectionStart = state.ss;
+        ta.selectionEnd = state.se;
+    }
+    function popUndo() {
+        if (undo_states.length > 0) {
+            var state = undo_states.pop();
+            applyState(state);
+            redo_states.push(state);
+        } else {
+            ta.value = "";
+        }
+    }
+    function popRedo() {
+        if (redo_states.length == 0) return;
+        var state = redo_states.pop();
+        applyState(state);
+        undo_states.push(state);
+    }
+
+    function download() {
+        data = "data:text/plain," + encodeURIComponent(ta.value);
+        window.open(data, 'download');
+    }
+
+    function spliceIn(str, cursor_delta, loc) {
+        var val = ta.value;
+        var cursor = ta.selectionStart;
+        if (!cursor_delta) {
+            cursor_delta = 0;
+        }
+        var moveCursor = false;
+        if (!loc) {
+            loc = cursor;
+            moveCursor = true;
+        }
+        ta.value = val.substring(0, loc) + str +
+            val.substring(loc, val.length);
+        val = ta.value;
+        if (moveCursor) {
+            cursor += str.length + cursor_delta;
+            ta.selectionStart = ta.selectionEnd = cursor;
+        }
+        render();
+        return cursor;
+    }
+
+    function wrapWith(pre, suf) {
+        if (suf === undefined) suf = pre;
+        var ss = ta.selectionStart;
+        var se = ta.selectionEnd;
+        spliceIn(pre, 0, ss);
+        ss += pre.length;
+        se += pre.length;
+        spliceIn(suf, 0, se);
+        ta.selectionStart = ss;
+        ta.selectionEnd = se;
+    }
+
+    function embolden() {
+        pushUndo();
+        wrapWith("**");
+    }
+    function italicize() {
+        pushUndo();
+        wrapWith("*");
+    }
+    function linkify() {
+        pushUndo();
+        wrapWith("[", "]()");
+    }
+
+    function prependToEach(strOrGen) {
+        var gen = null;
+        var str;
+        if (typeof strOrGen === 'function') {
+            gen = strOrGen;
+        } else {
+            str = strOrGen;
+        }
+        var ss = ta.selectionStart;
+        var se = ta.selectionEnd;
+        var val = ta.value;
+        var line_start = val.substring(0, ss).lastIndexOf('\n') + 1;
+        if (ss == se) {
+            if (gen) str = gen();
+            ta.value = val.substring(0, line_start) + str +
+                val.substring(line_start)
+            ss += str.length;
+            ta.selectionStart = ta.selectionEnd = ss;
+            render();
+            return;
+        }
+        var pre = val.substring(0, line_start);
+        var sel = val.substring(line_start, se);
+        var suf = val.substring(se);
+        lines = sel.split('\n');
+        var first = true;
+        for (var i = 0; i < lines.length; i++) {
+            if (gen) str = gen();
+            if (first) {
+                ss += str.length;
+                first = false;
+            }
+            lines[i] = str + lines[i];
+            se += str.length;
+        }
+        ta.value = pre + lines.join('\n') + suf;
+        ta.selectionStart = ss;
+        ta.selectionEnd = se;
+        render();
+    }
+    function createUL() {
+        pushUndo();
+        prependToEach("* ");
+    }
+    function createOL() {
+        pushUndo();
+        var i = 1;
+        prependToEach(function() {
+            return i++ + ". ";
+        });
+    }
+    function blockoff() {
+        pushUndo();
+        prependToEach("> ");
+    }
+    function render() {
+        output.innerHTML = converter.makeHtml(ta.value);
+    }
+    render();
+    ta.addEventListener('keypress', function(e) {
+        var val, lines, cursor, ss, se;
+        function resetVals() {
+            val = ta.value;
+            lines = val.split('\n');
+            cursor = ta.selectionStart;
+            ss = ta.selectionStart;
+            se = ta.selectionEnd;
+        }
+        resetVals();
+        if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey) {
+            var modKey = e.ctrlKey || e.metaKey;
+            if (modKey) {
+                if (e.keyCode == 105) {
+                    italicize();
+                    e.preventDefault();
+                    resetVals();
+                } else if (e.keyCode == 98) {
+                    embolden();
+                    e.preventDefault();
+                    resetVals();
+                } else if (e.keyCode == 107) {
+                    linkify();
+                    e.preventDefault();
+                    resetVals();
+                } else if (e.keyCode == 122 || e.keyCode == 121) {
+                    var undo = e.keyCode == 122 && !e.shiftKey;
+                    if (undo) {
+                        popUndo();
+                    } else {
+                        popRedo();
+                    }
+                    e.preventDefault();
+                    resetVals();
+                } else {
+                    pushUndo();
+                }
+            } else {
+                pushUndo();
+            }
+            return;
+        }
+        var ch = val[cursor - 1]
+        var lineBreakMatch = val.substring(0, cursor).match(/\n/g);
+        var currLine = 0;
+        if (lineBreakMatch) {
+            var currLine = lineBreakMatch.length;
+        }
+        if (e.keyCode == 13) {
+            pushUndo();
+            var match;
+            var numberRegex = /^(\s*)(\d+)\.\s+(.?)/;
+            function blankALine() {
+                lines[currLine] = "\n";
+                val = ta.value = lines.join('\n');
+                cursor -= match[0].length - 1;
+                ta.selectionStart = ta.selectionEnd = cursor;
+                e.preventDefault();
+            }
+            if (match = lines[currLine].match(/^(\s*)\*\s+(.?)/)) {
+                if (!match[2]) {
+                    blankALine();
+                    return;
+                }
+                spliceIn("\n" + match[1] + "* ");
+                e.preventDefault();
+                return;
+            } else if (match = lines[currLine].match(numberRegex)) {
+                if (!match[3]) {
+                    blankALine();
+                    return;
+                }
+                var num = +match[2] + 1;
+                spliceIn("\n" + match[1] + num + ". ");
+                e.preventDefault();
+                resetVals();
+                for (var line = currLine + 1; line < lines.length; line++) {
+                    if (match = lines[line].match(numberRegex)) {
+                        lines[line] = match[1] + num +
+                            lines[line].substring(match[2].length +
+                                match[1].length);
+                        num++;
+                    } else {
+                        break;
+                    }
+                }
+                val = ta.value = lines.join('\n');
+                ta.selectionStart = ta.selectionEnd = cursor;
+                return;
+            } else {
+                spliceIn("\n\n");
+                e.preventDefault();
+            }
+        } else if (false) {
+            // TODO: Handle backspace, somehow. Might need different event.
+        } else {
+            if (undo_state != INS || undo_keystrokes > 20) {
+                pushUndo();
+                undo_keystrokes = 1;
+                undo_state = INS;
+            } else {
+                undo_keystrokes++;
+            }
+        }
+    });
+    ta.addEventListener('keyup', function(e) {
+        render();
+    });
+
+  Downloadify.create('saveas',{
+    filename: function(){
+      return encodeURIComponent(ta.value.substring(0, ta.value.indexOf('\n')).replace(/\s/g, '-') + '.txt');
+    },
+    data: function(){ 
+      return ta.value;
+    },
+    onComplete: function(){ 
+    },
+    onCancel: function(){ 
+    },
+    onError: function(){ 
+    },
+    transparent: false,
+    swf: 'downloadify.swf',
+    downloadImage: 'savebtn.png',
+    width: 42,
+    height: 42,
+    transparent: true,
+    append: false
+  });
+</script>
